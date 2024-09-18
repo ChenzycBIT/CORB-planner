@@ -183,9 +183,9 @@ class drone_RL_agent_SDCQ():
 
         global_map = rospy.wait_for_message('/map_generator/global_cloud', PointCloud2)
         global_map = np.frombuffer(global_map.data, dtype=np.float32)
-        cloud = np.reshape(global_map, [int(global_map.shape[0] / 4), 4])  # 点云信息处理
+        cloud = np.reshape(global_map, [int(global_map.shape[0] / 4), 4])  
         cloud = cloud[:, :3] * 4
-        cloud = np.floor(cloud).astype(np.int32)  # 点云位置取整
+        cloud = np.floor(cloud).astype(np.int32) 
 
         cloud = ((cloud[:, 0] + 300) * 14400 + (cloud[:, 1] + 300) * 24 + np.clip(cloud[:, 2], 0, 23)).astype(np.int32)
         grid_map = np.zeros([600 * 600 * 24])
