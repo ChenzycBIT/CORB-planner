@@ -8,8 +8,7 @@ map_resolution = 1
 init_size = [61, 61, 31]
 expand_size = [63, 63, 33]
 map_center = [31, 31, 16]
-#强化学习处理
-def stage3_bdescpline_base(u):#三阶B样条基函数计算
+def stage3_bdescpline_base(u):
     if u > 2 and u <= 4:
         u = 4 - u
     if u >= 0 and u <= 1:
@@ -20,7 +19,7 @@ def stage3_bdescpline_base(u):#三阶B样条基函数计算
         raise ValueError('input must be in the range of [0, 4]')
     return y
 
-def stage2_bdescpline_base(u):#二阶B样条基函数计算
+def stage2_bdescpline_base(u):
     if u >= 0 and u <= 1:
         y = u ** 2 / 2
     elif u <= 2:
@@ -32,13 +31,12 @@ def stage2_bdescpline_base(u):#二阶B样条基函数计算
     return y
 
 def cloud_process(pos, target, cloud):
-    # pos: drone position, 3-dimensional array, [x, y, z] in numpy format and rviz coordinate
-    cloud = np.frombuffer(cloud, dtype=np.float32)#点云转张量
-    cloud = np.reshape(cloud, [int(cloud.shape[0] / 4), 4])#点云信息处理
+    cloud = np.frombuffer(cloud, dtype=np.float32)
+    cloud = np.reshape(cloud, [int(cloud.shape[0] / 4), 4])
     cloud = cloud[:, :3] * 3
-    cloud = np.floor(cloud).astype(np.int32)#点云位置取整
+    cloud = np.floor(cloud).astype(np.int32)
     grid_pos = np.floor(pos * 3).astype(np.int32)
-    cloud = cloud - np.array([grid_pos])#世界坐标转换到无人机坐标
+    cloud = cloud - np.array([grid_pos])
     x1bound = cloud[:, 0] >= -30
     x2bound = cloud[:, 0] <= 30
     y1bound = cloud[:, 1] >= -30
@@ -55,18 +53,7 @@ def cloud_process(pos, target, cloud):
     grid_map = grid_map.reshape([61, 61, 31])
     grid_map[:, :, 2:] = np.clip(grid_map[:, :, 2:] + grid_map[:, :, 1: -1] + grid_map[:, :, :-2], 0, 1).astype(
         np.int32)  # occupancy grid map 生成
-    '''
-    plt.figure(figsize=(8, 6))  # 设置画布大小
-    ax = plt.axes(projection='3d')  # 设置三维轴
-    ax.scatter3D(cloud[:, 0], cloud[:, 1], cloud[:, 2])
-    plt.show()
-    grid_map = np.zeros([35, 35, 15])#central grid: [17, 17, 7]
-    for relative_position in cloud:
-        if np.min(relative_position) < -17 or np.max(relative_position) > 17 or np.abs(relative_position[2]) > 7:
-            continue
-        else:
-            grid_map[relative_position[0] + 17, relative_position[1] + 17, relative_position[2] + 7] = 1
-    '''
+
     grid_map = np.concatenate([np.zeros([1, 61, 31]), grid_map, np.zeros([1, 61, 31])], axis=0)
     grid_map = np.concatenate([np.zeros([63, 1, 31]), grid_map, np.zeros([63, 1, 31])], axis=1)
     grid_map = np.concatenate([np.zeros([63, 63, 1]), grid_map, np.zeros([63, 63, 1])], axis=2)#地图填充一圈0
@@ -74,10 +61,10 @@ def cloud_process(pos, target, cloud):
         raise ValueError('drone too low!')
     try:
         if grid_pos[2] < 18:
-            grid_map[:, :, :18 - grid_pos[2]] = 1#地面以下全部置1
+            grid_map[:, :, :18 - grid_pos[2]] = 1
     except:
         pass
-    if grid_pos[2] >= 36:#限高，12米以上全部置1
+    if grid_pos[2] >= 36:
         raise ValueError('drone too high!')
     try:
         if grid_pos[2] > 22:
@@ -91,95 +78,13 @@ def cloud_process(pos, target, cloud):
     try:
         if grid_map[relative_target[0] + 31, relative_target[1] + 31, relative_target[2] + 16] != 0:
             print('obstacles appeared at the target! we assume that there are nothing')
-            grid_map[relative_target[0] + 31, relative_target[1] + 31, relative_target[2] + 16] = 0#目标点位置1设置为无障碍物
+            grid_map[relative_target[0] + 31, relative_target[1] + 31, relative_target[2] + 16] = 0
     except:
         pass
     return grid_map
 
-'''
-def Astar_process1(start, end, map):#A*处理
-    #start and end are all 3-dimensional int16 array
-    if start[2] == end[2]:#起始点与目标点位于同一高度，二维A*
-        dimensions = 2
-        expansion = 6
-        box_xmin = max(0, min(start[0], end[0]) - expansion)
-        box_xmax = min(43, max(start[0], end[0]) + expansion + 1)
-        box_ymin = max(0, min(start[1], end[1]) - expansion)
-        box_ymax = min(43, max(start[1], end[1]) + expansion)
-        Astar_map = map[box_xmin: box_xmax, box_ymin: box_ymax, start[2]]#A*局部地图生成，并转换局部地图之下的起点、终点坐标
-        try:
-            Astar_trajectory_base = np.array([[box_xmin, box_ymin]]).astype(np.int16)
-            base_start = start[:2] - Astar_trajectory_base[0]
-            base_end = end[:2] - Astar_trajectory_base[0]
-            Astar_trajectory_list = a_search_2d(base_start, base_end, Astar_map)
-            Astar_trajectory_list += Astar_trajectory_base
-            Astar_trajectory_list = np.concatenate(
-            [Astar_trajectory_list, np.ones([Astar_trajectory_list.shape[0], 1]) * start[2]], axis=1)
-            return Astar_trajectory_list
-        except Exception as e:
-            print(e)
-            pass
-    else:
-        dimensions = 3#三维A*
-        expansion = 4
-        box_xmin = max(0, min(start[0], end[0]) - expansion)
-        box_xmax = min(43, max(start[0], end[0]) + expansion + 1)
-        box_ymin = max(0, min(start[1], end[1]) - expansion)
-        box_ymax = min(43, max(start[1], end[1]) + expansion + 1)
-        box_zmin = max(0, min(start[2], end[2]) - expansion)
-        box_zmax = min(27, max(start[2], end[2]) + expansion + 1)
-        Astar_map = map[box_xmin: box_xmax, box_ymin: box_ymax, box_zmin: box_zmax]
-        try:
-            Astar_trajectory_base = np.array([[box_xmin, box_ymin, box_zmin]]).astype(np.int16)
-            base_start = start - Astar_trajectory_base[0]
-            base_end = end - Astar_trajectory_base[0]
-            Astar_trajectory_list = a_search_plus(base_start, base_end, Astar_map)
-            Astar_trajectory_list += Astar_trajectory_base
-            return Astar_trajectory_list
-        except:
-            pass
-    if np.min(map[int(max(start[0] - 2, 0)): int(min(start[0] + 3, 43)),#以上寻路都失败，则规划垂直拉升路径
-              int(max(start[1] - 2, 0)): int(max(start[1] + 3, 43)), start[2]]) == 0:
-        map[start[0], start[1], start[2]:] = 0
-        map[end[0], end[1], end[2]:] = 0
-        map[:, :, -1] = np.min(map[:, :, -1])
-        if dimensions == 2:
-            height_start = min(27, start[2] + 1)
-        else:
-            height_start = min(27, max(start[2], end[2]))
-        expansion = 6
-        box_xmin = max(0, min(start[0], end[0]) - expansion)
-        box_xmax = min(43, max(start[0], end[0]) + expansion + 1)
-        box_ymin = max(0, min(start[1], end[1]) - expansion)
-        box_ymax = min(43, max(start[1], end[1]) + expansion)
-        for i in range(height_start, 27):
-            Astar_map = map[box_xmin: box_xmax, box_ymin: box_ymax, i]
-            try:
-                Astar_trajectory_base = np.array([[box_xmin, box_ymin]]).astype(np.int16)
-                base_start = start[:2] - Astar_trajectory_base[0]
-                base_end = end[:2] - Astar_trajectory_base[0]
-                Astar_trajectory_list = a_search_2d(base_start, base_end, Astar_map)
-                Astar_trajectory_list += Astar_trajectory_base
-                Astar_start_append = []
-                for j in range(start[2], i):
-                    Astar_start_append.append([start[0], start[1], j])
-                Astar_end_append = []
-                for j in reversed(range(end[2], i)):
-                    Astar_end_append.append([end[0], end[1], j])
-                Astar_trajectory_list = np.concatenate([Astar_trajectory_list,
-                                                        np.ones([Astar_trajectory_list.shape[0], 1]) * i],axis=1)
-                Astar_trajectory_list = np.concatenate([np.array(Astar_start_append),
-                                                        np.array(Astar_trajectory_list),
-                                                        np.array(Astar_end_append)], axis=0)
-                return Astar_trajectory_list
-            except Exception as e:
-                print(e)
-                pass
-    raise ValueError('Could not find a proper path')
-'''
-
-def Astar_process(start, end, map):#A*处理
-    if start[2] == end[2]:  # 起始点与目标点位于同一高度，二维A*
+def Astar_process(start, end, map):
+    if start[2] == end[2]:  
         expansion = 8
         box_xmin = max(0, min(start[0], end[0]) - expansion)
         box_xmax = min(41, max(start[0], end[0]) + expansion + 1)
@@ -248,7 +153,7 @@ def Astar_process(start, end, map):#A*处理
             pass
     raise ValueError('3d time too long')
 
-def Astar_process_3d(start, end, map):#A*处理
+def Astar_process_3d(start, end, map):
     expansion = 8
     box_xmin = max(0, min(start[0], end[0]) - expansion)
     box_xmax = min(41, max(start[0], end[0]) + expansion + 1)
@@ -332,52 +237,31 @@ def out_obstacle(grid_map):
 
 def find_path(pos, target, vel, grid_map):
     if (target[2] - pos[2] > 0.8):
-        target[2] = pos[2] + 0.8#地图寻路函数
+        target[2] = pos[2] + 0.8
     elif (target[2] - pos[2] < -0.8):
         target[2] = pos[2] - 0.8
     astar_sign = 0
     grid_map[0] = 0
     grid_map[-1] = 0
     grid_map[:, 0] = 0
-    grid_map[:, -1] = 0#在x轴，y轴方向填充一圈0
+    grid_map[:, -1] = 0
     path = np.array([[20, 20, 10]]).astype(np.float64)
     obstacles = [0]
-    pos1 = pos * 4  # 地图分辨率为1/4米，轨迹分辨率类似
+    pos1 = pos * 4 
     pos1[2] *= 2
-    pos_base = pos1 % 1 #无人机在栅格内初始位置精确值
-    path[0] += pos_base#生成路径第一个点（无人机当前位置）
+    pos_base = pos1 % 1 
+    path[0] += pos_base
     grid_map[19: 22, 20, 10] = 0
-    '''
-        out_path = out_obstacle(grid_map)
-        path = np.concatenate([path, np.array(out_path) + 0.5], axis=0)
-        pos1 = pos1 + (path[-1] - path[1])
-    '''
-    #防止轨迹发生急转弯
-    '''
-    vel_abs = np.sum(vel[:2] ** 2) ** 0.5
-    if vel_abs > 0.5:
-        relative_target = target - pos
-        if np.sum(relative_target[:2] * vel[:2]) < 0:
-            vel_dir = vel[:2] / np.sum(vel[:2] ** 2) ** 0.5
-            for i in range(2):
-                if grid_map[np.floor(path[-1, 0] + vel_dir[0]).astype(np.int16),
-                np.floor(path[-1, 1] + vel_dir[1]).astype(np.int16),
-                np.floor(path[-1, 2]).astype(np.int16)] == 0:
-                    path = np.append(path, (path[-1] + np.array([vel_dir[0], vel_dir[1], 0]))[np.newaxis], axis=0)
-                    obstacles.append(0)
-                else:
-                    break
-    '''
 
     target = target * 4
     target[2] *= 2
-    relative_target = (target - pos1)  # 目标相对位置
+    relative_target = (target - pos1) 
     grid_target = path[0] + relative_target
     target_direction = grid_target - path[-1]
 
-    grid_targetz = relative_target[2] + 10  # 目标相对位置（z轴）
+    grid_targetz = relative_target[2] + 10  
     #(1)
-    path_resolution = (np.sum(target_direction[:2] ** 2) ** 0.5).astype(np.int16)  # 轨迹分辨率
+    path_resolution = (np.sum(target_direction[:2] ** 2) ** 0.5).astype(np.int16)  
     if path_resolution < 2:
         raise ValueError('success! reached the target')
     target_direction = target_direction[:2] / path_resolution
@@ -415,7 +299,7 @@ def find_path(pos, target, vel, grid_map):
         except:
             break
         path = np.append(path, path_position[np.newaxis], axis=0)
-        if len(path) >= 30:  # 截取参考轨迹前30个点
+        if len(path) >= 30:  
             break
     obstacles = np.array(obstacles)
     obstacles1 = copy.deepcopy(obstacles)
@@ -565,7 +449,7 @@ def find_path(pos, target, vel, grid_map):
 
 
 
-def initial_point_generation(pos, vel, acc, knots=[1/6, 1/6]):#基于无人机当前状态计算B样条前三个位置点
+def initial_point_generation(pos, vel, acc, knots=[1/6, 1/6]):
     #check pass
     #Assume that delta_t = 0.5
     x_array = np.array([pos[0], vel[0], acc[0]])
@@ -590,14 +474,13 @@ total_weight_matrix[10: 20, 1: 3] = weight_matrix
 total_weight_matrix[20: 30, 2: 4] = weight_matrix
 total_weight_matrix[30: 40, 3: 5] = weight_matrix
 total_weight_matrix[40: 50, 4: 6] = weight_matrix
-k_j = 0.01#jerk约束惩罚系数
+k_j = 0.01
 k_a = 0.0
 k_forward = 12
 k_traj = 3
 max_jerk = 80
 max_z_jerk = 50
-def get_reward(path, max_err, points, previous_forward, jerk_point, acc_point, delta_t, plan_time):#奖励函数计算
-    #轨迹奖励系数
+def get_reward(path, max_err, points, previous_forward, jerk_point, acc_point, delta_t, plan_time):
     xy_jerk = (jerk_point[0] ** 2 + jerk_point[1] ** 2) ** 0.5
     z_jerk = jerk_point[2] * 2
     if (xy_jerk > max_jerk or z_jerk > max_z_jerk):
@@ -616,7 +499,7 @@ def get_reward(path, max_err, points, previous_forward, jerk_point, acc_point, d
     acc_reward = -k_a * (np.sum(np.abs(acc_point[:2]) ** 2.5) + np.abs(acc_point[2])) * delta_t
     '''
     position_weights = np.array([[1 / 6, 4 / 6, 1 / 6]])
-    current_position = np.matmul(position_weights, points[-3:])#无人机在当前轨迹规划结束点的位置
+    current_position = np.matmul(position_weights, points[-3:])
 
     previous_forward_point = int(np.floor(previous_forward))
 
@@ -627,7 +510,7 @@ def get_reward(path, max_err, points, previous_forward, jerk_point, acc_point, d
         err_slice = np.concatenate([err_slice, err_slice[:-1].repeat(10 - err_slice.shape[0], axis=0)], axis=0)
     path_points = np.matmul(total_weight_matrix, path_slice[:6])
     delta_traj = np.abs(path_points - current_position)
-    delta_traj = np.sum(delta_traj ** 2, axis=1)#无人机位置与各轨迹点之间的距离
+    delta_traj = np.sum(delta_traj ** 2, axis=1)
     current_forward = np.argmin(delta_traj)
     current_forward = previous_forward_point + current_forward / 10
     current_forward = max(current_forward, previous_forward)
@@ -649,7 +532,7 @@ def get_reward(path, max_err, points, previous_forward, jerk_point, acc_point, d
     forward_reward = forward_reward / delta_t
     if current_forward - previous_forward > 0:
         forward_reward += k_forward
-    if np.max(np.abs(path_state[6: 9] - path_state[3: 6])) <= 0.01:#轨迹到达终点
+    if np.max(np.abs(path_state[6: 9] - path_state[3: 6])) <= 0.01:
         done = True
         reward = 60 + (1.5 - float(plan_time.detach().cpu())) * 150 - jerk_done + forward_reward
         if jerk_done > 0:
@@ -659,7 +542,7 @@ def get_reward(path, max_err, points, previous_forward, jerk_point, acc_point, d
         return reward, path_state, err_state, current_forward, done, info
 
     traj_reward = []
-    for point_index in range(1, 11):#每两个控制点之间分为10个轨迹点进行计算
+    for point_index in range(1, 11):
         weights = np.array([[stage3_bdescpline_base((point_index / 10) + 3),
                              stage3_bdescpline_base((point_index / 10) + 2),
                              stage3_bdescpline_base((point_index / 10) + 1),
@@ -721,7 +604,7 @@ def get_reward(path, max_err, points, previous_forward, jerk_point, acc_point, d
                 else:
                     info = "traj crash"
             return reward, path_state, err_state, previous_forward, done, info
-        traj_reward.append((0.1 - np.clip(bias_max - bias - 0.1, -0.1, 0) - delta_z) * delta_t)#距离误差大于0.5失败，大于0.2给负奖励
+        traj_reward.append((0.1 - np.clip(bias_max - bias - 0.1, -0.1, 0) - delta_z) * delta_t)
 
     traj_reward = np.array(traj_reward)
     reward = np.sum(traj_reward) * k_traj - jerk_done + 3
@@ -796,16 +679,16 @@ def gridmap_process(grid_map, pos, target):
         grid_map[30: 33, 30: 33, 14: 17] = occ_map_center
     grid_map = np.concatenate([np.zeros([1, 61, 30]), grid_map, np.zeros([1, 61, 30])], axis=0)
     grid_map = np.concatenate([np.zeros([63, 1, 30]), grid_map, np.zeros([63, 1, 30])], axis=1)
-    grid_map = np.concatenate([np.zeros([63, 63, 2]), grid_map, np.zeros([63, 63, 1])], axis=2)  # 地图填充一圈0
+    grid_map = np.concatenate([np.zeros([63, 63, 2]), grid_map, np.zeros([63, 63, 1])], axis=2)  
     grid_pos = np.floor(pos * 3).astype(np.int32)
     if grid_pos[2] <= 0:
         raise ValueError('drone too low!')
     try:
         if grid_pos[2] < 18:
-            grid_map[:, :, :min(14, 18 - grid_pos[2])] = 1  # 地面以下全部置1
+            grid_map[:, :, :min(14, 18 - grid_pos[2])] = 1  
     except:
         pass
-    if grid_pos[2] >= 36:  # 限高，12米以上全部置1
+    if grid_pos[2] >= 36:  
         raise ValueError('drone too high!')
     try:
         if grid_pos[2] > 22:
@@ -819,7 +702,7 @@ def gridmap_process(grid_map, pos, target):
     try:
         if grid_map[relative_target[0] + 31, relative_target[1] + 31, relative_target[2] + 16] != 0:
             print('obstacles appeared at the target! we assume that there are nothing')
-            grid_map[relative_target[0] + 31, relative_target[1] + 31, relative_target[2] + 16] = 0  # 目标点位置1设置为无障碍物
+            grid_map[relative_target[0] + 31, relative_target[1] + 31, relative_target[2] + 16] = 0 
     except:
         pass
     return grid_map
