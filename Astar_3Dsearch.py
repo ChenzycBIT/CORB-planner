@@ -254,7 +254,6 @@ def a_search_2d(init, target, occupancy_map):
 
 
 def a_search_2d_normal(init, target, occupancy_map):
-    #输入量： initchushiweizhi
     occupancy_map = occupancy_map.astype(np.int16)
     init = np.floor(np.array(init)).astype(np.int16)
     target = np.floor(np.array(target)).astype(np.int16)
@@ -264,7 +263,6 @@ def a_search_2d_normal(init, target, occupancy_map):
     if init_H == 0:
         raise ValueError('init and target can not be the same!')
     close_list = np.array([np.insert(np.insert(init, 0, init_H, axis=0), 0, 0, axis=0)]).astype(np.int16)
-    #点格式：【G, H, 位置】
     neighbor_list = np.array([[1, 0],
                               [-1, 0],
                               [0, 1],
